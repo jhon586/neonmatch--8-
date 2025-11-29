@@ -1,0 +1,8 @@
+{
+  "name": "NeonMatch",
+  "description": "A QR-based, number-centric social connection app for venues. Register, get a number, and match with others nearby using AI-powered assistance.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
