@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, MatchRequest, Message, EventStatus } from '../types';
+import { User, MatchRequest, Message, EventStatus, Report } from '../types';
 import { createSupabaseClient, getSupabaseConfig, saveSupabaseConfig } from '../lib/supabase';
 
 interface AppContextType {
@@ -9,21 +9,26 @@ interface AppContextType {
   incomingLikes: MatchRequest[];
   matches: MatchRequest[];
   messages: Message[];
+  reports: Report[];
   isLoading: boolean;
   isConfigured: boolean;
   eventStatus: EventStatus;
+  winners: { king: User | null; queen: User | null } | null;
   
   register: (name: string, bio: string, photoUrl: string | null) => Promise<void>;
   sendLike: (targetId: number) => Promise<{ success: boolean; message: string }>;
   respondToLike: (fromId: number, accept: boolean) => Promise<void>;
   sendMessage: (toId: number, text: string, type?: 'text'|'image'|'dedication', file?: File) => Promise<void>;
-  logout: () => void;
+  reportUser: (reportedId: number, reason: string) => Promise<void>;
+  logout: () => Promise<void>;
   configureServer: (url: string, key: string) => void;
   
   // Admin Functions
   resetEvent: () => Promise<void>;
   kickAllUsers: () => Promise<void>;
   toggleEventStatus: (status: EventStatus) => Promise<void>;
+  coronateWinners: () => Promise<void>;
+  resolveReport: (reportId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -36,9 +41,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [matchRequests, setMatchRequests] = useState<MatchRequest[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [reports, setReports] = useState<Report[]>([]); 
   const [isLoading, setIsLoading] = useState(false);
   const [isConfigured, setIsConfigured] = useState(!!getSupabaseConfig());
   const [eventStatus, setEventStatus] = useState<EventStatus>('open');
+  const [winners, setWinners] = useState<{ king: User | null; queen: User | null } | null>(null);
 
   const configureServer = (url: string, key: string) => {
     saveSupabaseConfig(url.trim(), key.trim());
@@ -47,7 +54,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsConfigured(!!newClient);
   };
 
-  const logout = () => {
+  // LOGOUT AHORA BORRA EL USUARIO PARA RECICLAR EL NÚMERO
+  // Si el usuario 4 se va, el 4 queda libre para el siguiente.
+  const logout = async () => {
+    if (currentUser && supabase) {
+        // Borrar usuario de la DB para liberar ID
+        await supabase.from('users').delete().eq('id', currentUser.id);
+        // Opcional: Borrar matches relacionados para limpiar
+        await supabase.from('matches').delete().or(`from_id.eq.${currentUser.id},to_id.eq.${currentUser.id}`);
+    }
     setCurrentUser(null);
     localStorage.removeItem(SESSION_USER_ID_KEY);
     window.location.reload();
@@ -57,11 +72,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!supabase) return;
 
     const fetchData = async () => {
-      // 1. Cargar Estado del Evento
       const { data: settings } = await supabase.from('system_settings').select('*').eq('key', 'event_status').single();
       if (settings) setEventStatus(settings.value as EventStatus);
 
-      // 2. Cargar Usuarios
       const { data: usersData } = await supabase.from('users').select('*').order('id', { ascending: true });
       if (usersData) {
         const mappedUsers = usersData.map((u: any) => ({
@@ -77,10 +90,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (storedId) {
           const found = mappedUsers.find((u: User) => u.id === parseInt(storedId));
           if (found) setCurrentUser(found);
+          else {
+            // Si tengo ID local pero no está en la base de datos (fue borrado/reciclado), hacer logout forzoso
+             localStorage.removeItem(SESSION_USER_ID_KEY);
+             setCurrentUser(null);
+          }
         }
       }
 
-      // 3. Cargar Matches
       const { data: matchesData } = await supabase.from('matches').select('*');
       if (matchesData) {
         setMatchRequests(matchesData.map((m: any) => ({
@@ -91,7 +108,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })));
       }
 
-      // 4. Cargar Mensajes
       const { data: msgData } = await supabase.from('messages').select('*').order('timestamp', { ascending: true });
       if (msgData) {
         setMessages(msgData.map((m: any) => ({
@@ -108,24 +124,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     fetchData();
 
-    // CANAL DE COMANDOS GLOBALES (ADMIN KICK)
+    // CANALES DE TIEMPO REAL
     const commandChannel = supabase.channel('global_commands')
       .on('broadcast', { event: 'force_logout' }, () => {
-        console.log("Admin ha forzado el cierre de sesión");
         logout();
+      })
+      .on('broadcast', { event: 'coronation' }, (payload: any) => {
+         setWinners(payload.payload);
+         setTimeout(() => setWinners(null), 15000); // Mostrar ganadores por 15 segundos
+      })
+      .on('broadcast', { event: 'new_report' }, (payload: any) => {
+         // Añadir reporte al estado local (visible solo para admin)
+         setReports(prev => [...prev, payload.payload]);
       })
       .subscribe();
 
-    // CANAL DE CAMBIOS EN BASE DE DATOS
     const dbChannel = supabase.channel('public_db_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => fetchData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'system_settings' }, (payload: any) => {
         if (payload.new && payload.new.key === 'event_status') {
            setEventStatus(payload.new.value as EventStatus);
-           if (payload.new.value === 'closed' && !localStorage.getItem(SESSION_USER_ID_KEY)) {
-             window.location.reload();
-           }
         }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload: any) => {
@@ -151,14 +170,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [supabase]);
 
+  // REGISTRO CON RECICLAJE DE IDs (RELLENAR HUECOS)
   const register = async (name: string, bio: string, photoUrl: string | null) => {
     if (!supabase) return;
-    if (eventStatus === 'closed') {
-      alert("El evento está cerrado. No se admiten nuevos registros.");
-      return;
-    }
     setIsLoading(true);
-    const { data } = await supabase.from('users').insert([{ name, bio, photo_url: photoUrl }]).select().single();
+
+    // 1. Obtener todos los IDs actuales ordenados para buscar el primer hueco libre
+    const { data: existingUsers } = await supabase.from('users').select('id').order('id', { ascending: true });
+    
+    let newId = 1;
+    if (existingUsers && existingUsers.length > 0) {
+        const ids = existingUsers.map((u: any) => u.id);
+        // Algoritmo: Buscar el primer entero i que no coincida con ids[i-1]
+        // Ejemplo: [1, 2, 4] -> Falta el 3.
+        for (let i = 0; i < ids.length; i++) {
+            if (ids[i] !== i + 1) {
+                newId = i + 1; // Encontramos un hueco
+                break;
+            }
+        }
+        // Si no se rompió el bucle, significa que están todos seguidos (1,2,3), así que tomamos el siguiente (4)
+        if (newId === 1 && ids[0] === 1 && ids[ids.length - 1] === ids.length) {
+            newId = ids.length + 1;
+        }
+    }
+
+    // Insertar forzando el ID. 
+    // NOTA: Esto requiere que la columna ID en Supabase sea 'generated by default as identity', no 'always'.
+    const { data, error } = await supabase.from('users').insert([{ 
+        id: newId,
+        name, 
+        bio, 
+        photo_url: photoUrl 
+    }]).select().single();
+
+    if (error) {
+        console.error("Error creating user with recycled ID:", error);
+        alert("Error al asignar número. Inténtalo de nuevo.");
+        setIsLoading(false);
+        return;
+    }
+
     if (data) {
       const newUser: User = { id: data.id, name: data.name, bio: data.bio, photoUrl: data.photo_url, joinedAt: data.joined_at };
       setAllUsers(prev => [...prev, newUser]);
@@ -168,34 +220,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsLoading(false);
   };
 
+  const reportUser = async (reportedId: number, reason: string) => {
+      if (!currentUser || !supabase) return;
+      
+      const report: Report = {
+          id: Date.now().toString(),
+          reporterId: currentUser.id,
+          reportedId,
+          reason,
+          timestamp: Date.now(),
+          status: 'pending'
+      };
+
+      // Enviar a canal de admin (Broadcast para que le salga la notificación al admin conectado)
+      await supabase.channel('global_commands').send({
+          type: 'broadcast',
+          event: 'new_report',
+          payload: report
+      });
+      
+      // En una app real, guardaríamos esto en una tabla 'reports'.
+  };
+
+  const resolveReport = async (reportId: string) => {
+      setReports(prev => prev.filter(r => r.id !== reportId));
+  };
+
   // --- ADMIN FUNCTIONS ---
 
   const resetEvent = async () => {
     if (!supabase) return;
     setIsLoading(true);
-    
-    // 1. Echar a todos antes de borrar
     await kickAllUsers();
     
-    // 2. Intentar usar la función de base de datos para reinicio TOTAL (IDs a 1)
-    const { error } = await supabase.rpc('reset_event');
+    // Limpieza manual de tablas
+    await supabase.from('messages').delete().neq('id', 0);
+    await supabase.from('matches').delete().neq('id', 0);
+    await supabase.from('users').delete().neq('id', 0);
     
-    if (error) {
-      console.warn("Función 'reset_event' no encontrada en Supabase. Borrando manualmente (IDs no se reiniciarán a 1).", error);
-      // Fallback: Borrado manual (no reinicia contador)
-      await supabase.from('messages').delete().neq('id', 0);
-      await supabase.from('matches').delete().neq('id', 0);
-      await supabase.from('users').delete().neq('id', 0);
-    }
-    
-    // 3. Limpiar estado local
     setAllUsers([]);
     setMatchRequests([]);
     setMessages([]);
+    setReports([]);
     setCurrentUser(null);
     setIsLoading(false);
-    
-    // Recargar para limpiar todo
     window.location.reload();
   };
 
@@ -210,11 +278,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const toggleEventStatus = async (status: EventStatus) => {
     if (!supabase) return;
+    // Usamos upsert para actualizar o crear la configuración
     await supabase.from('system_settings').upsert({ key: 'event_status', value: status });
     setEventStatus(status);
   };
 
-  // --- STANDARD FUNCTIONS ---
+  const coronateWinners = async () => {
+      // 1. Contar likes recibidos (incoming likes accepted or pending)
+      const likeCounts: { [key: number]: number } = {};
+      
+      matchRequests.forEach(m => {
+          likeCounts[m.toId] = (likeCounts[m.toId] || 0) + 1;
+      });
+
+      // 2. Ordenar usuarios por likes descendente
+      const sortedUsers = [...allUsers].sort((a, b) => {
+          return (likeCounts[b.id] || 0) - (likeCounts[a.id] || 0);
+      });
+
+      if (sortedUsers.length < 2) {
+          alert("No hay suficientes usuarios para elegir Reyes.");
+          return;
+      }
+
+      // 3. Elegir top 2
+      const k = sortedUsers[0];
+      const q = sortedUsers[1];
+
+      // 4. Emitir evento global
+      await supabase.channel('global_commands').send({
+          type: 'broadcast',
+          event: 'coronation',
+          payload: { king: k, queen: q }
+      });
+  };
 
   const sendLike = async (targetId: number): Promise<{ success: boolean; message: string }> => {
     if (!currentUser || !supabase) return { success: false, message: 'Error de conexión' };
@@ -233,12 +330,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const respondToLike = async (fromId: number, accept: boolean) => {
     if (!currentUser || !supabase) return;
     const status = accept ? 'accepted' : 'rejected';
-    
     setMatchRequests(prev => prev.map(m => {
       if (m.fromId === fromId && m.toId === currentUser.id) return { ...m, status: status as any };
       return m;
     }));
-    
     await supabase.from('matches').update({ status: status }).eq('from_id', fromId).eq('to_id', currentUser.id);
   };
 
@@ -250,7 +345,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (file && type === 'image') {
       const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
       const { data, error } = await supabase.storage.from('chat-images').upload(fileName, file);
-      
       if (!error && data) {
          const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(fileName);
          attachmentUrl = urlData.publicUrl;
@@ -288,8 +382,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   return (
     <AppContext.Provider value={{
-      currentUser, allUsers, incomingLikes, matches, messages, isLoading, isConfigured, eventStatus,
-      register, sendLike, respondToLike, sendMessage, logout, resetEvent, configureServer, kickAllUsers, toggleEventStatus
+      currentUser, allUsers, incomingLikes, matches, messages, reports, isLoading, isConfigured, eventStatus, winners,
+      register, sendLike, respondToLike, sendMessage, reportUser, logout, resetEvent, configureServer, kickAllUsers, toggleEventStatus, coronateWinners, resolveReport
     }}>
       {children}
     </AppContext.Provider>
