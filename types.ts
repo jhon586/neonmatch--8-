@@ -12,7 +12,7 @@ export interface Message {
   senderId: number;
   receiverId: number;
   text: string;
-  type?: 'text' | 'image' | 'dedication';
+  type?: 'text' | 'image' | 'dedication' | 'audio';
   attachmentUrl?: string;
   timestamp: number;
 }
@@ -24,6 +24,16 @@ export interface MatchRequest {
   timestamp: number;
 }
 
+export interface Report {
+  id: string;
+  reporterId: number;
+  reportedId: number;
+  reason: string;
+  timestamp: number;
+  status: 'pending' | 'resolved';
+}
+
 export type AppView = 'onboarding' | 'dashboard' | 'chat';
 
 export type EventStatus = 'open' | 'closed';
+
