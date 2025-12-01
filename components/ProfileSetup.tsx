@@ -22,6 +22,7 @@ export const ProfileSetup: React.FC = () => {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950 text-center">
         <div>
+          <h1 className="text-6xl mb-4">⛔</h1>
           <h1 className="text-4xl font-black text-red-500 mb-4">CERRADO</h1>
           <p className="text-white text-lg">El local no admite nuevos registros en este momento.</p>
           <p className="text-slate-500 mt-2">Inténtalo más tarde.</p>
@@ -46,14 +47,22 @@ export const ProfileSetup: React.FC = () => {
     setIsCameraOpen(true);
     setPhoto(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      // Intentar primero cámara frontal (ideal para selfies)
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 640 } } 
+      });
+      if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) {
-      console.error("Error accessing camera:", err);
-      alert("No se pudo acceder a la cámara. Por favor, verifica los permisos.");
-      setIsCameraOpen(false);
+      console.warn("Fallo cámara frontal, intentando cámara genérica...", err);
+      try {
+        // Fallback: Cualquier cámara disponible si la frontal falla (común en webviews antiguos)
+        const streamFallback = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) videoRef.current.srcObject = streamFallback;
+      } catch (err2) {
+        console.error("No se pudo acceder a ninguna cámara:", err2);
+        alert("No se pudo abrir la cámara. Puede que tu navegador bloquee el acceso. Intenta subir una foto de la galería.");
+        setIsCameraOpen(false);
+      }
     }
   };
 
@@ -65,11 +74,15 @@ export const ProfileSetup: React.FC = () => {
       canvas.height = video.videoHeight;
       const context = canvas.getContext('2d');
       if (context) {
+        // Hacemos espejo horizontal para que la selfie se sienta natural
         context.translate(canvas.width, 0);
         context.scale(-1, 1);
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
         const dataUrl = canvas.toDataURL('image/png');
         setPhoto(dataUrl);
+        
+        // Detener cámara para ahorrar batería
         const stream = video.srcObject as MediaStream;
         stream?.getTracks().forEach(track => track.stop());
         setIsCameraOpen(false);
@@ -104,16 +117,16 @@ export const ProfileSetup: React.FC = () => {
     <div className="min-h-screen flex flex-col justify-center px-6 py-12">
       <div className="max-w-md w-full mx-auto space-y-8">
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-pink-500 to-violet-600 mb-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-pink-500 to-violet-600 mb-4 animate-bounce">
             <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
           </div>
           <h2 className="text-3xl font-black tracking-tight text-white">Consigue tu Número</h2>
-          <p className="mt-2 text-slate-400">Únete a la red exclusiva del local.</p>
+          <p className="mt-2 text-slate-400 text-sm">Rellenamos los huecos libres. Si alguien se va, ¡su número puede ser tuyo!</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6 bg-slate-900/50 p-6 rounded-2xl border border-slate-800 backdrop-blur-xl">
+        <form onSubmit={handleSubmit} className="space-y-6 bg-slate-900/50 p-6 rounded-2xl border border-slate-800 backdrop-blur-xl shadow-xl">
           <Input 
             label="Tu Nombre" 
             placeholder="ej. Alex" 
@@ -127,7 +140,7 @@ export const ProfileSetup: React.FC = () => {
             {!isCameraOpen ? (
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-center w-full">
-                  <div className="relative w-full h-48 border-2 border-slate-700 border-dashed rounded-xl overflow-hidden bg-slate-800/50 flex flex-col items-center justify-center group">
+                  <div className="relative w-full h-56 border-2 border-slate-700 border-dashed rounded-xl overflow-hidden bg-slate-800/50 flex flex-col items-center justify-center group">
                     {photo ? (
                       <>
                         <img src={photo} alt="Vista previa" className="w-full h-full object-cover" />
@@ -135,42 +148,59 @@ export const ProfileSetup: React.FC = () => {
                       </>
                     ) : (
                       <div className="text-center p-4">
-                        <svg className="w-10 h-10 mx-auto text-slate-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                        <p className="text-sm text-slate-500">Sin foto seleccionada</p>
+                        <span className="text-4xl">📸</span>
+                        <p className="text-sm text-slate-500 mt-2">Sin foto seleccionada</p>
                       </div>
                     )}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <label className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-700 transition-all text-sm font-bold text-white">
+                  <label className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl cursor-pointer hover:bg-slate-700 transition-all text-sm font-bold text-white shadow-lg">
                     <span>📁</span> Galería
                     <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
                   </label>
-                  <button type="button" onClick={startCamera} className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 transition-all text-sm font-bold text-white">
+                  <button type="button" onClick={startCamera} className="flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-pink-600 to-pink-500 border border-transparent rounded-xl hover:from-pink-500 hover:to-pink-400 transition-all text-sm font-bold text-white shadow-lg shadow-pink-500/30">
                     <span>📸</span> Cámara
                   </button>
                 </div>
               </div>
             ) : (
-              <div className="relative w-full bg-black rounded-xl overflow-hidden">
-                <video ref={videoRef} autoPlay playsInline className="w-full h-64 object-cover transform scale-x-[-1]" />
+              <div className="relative w-full bg-black rounded-xl overflow-hidden shadow-2xl ring-2 ring-pink-500">
+                <video ref={videoRef} autoPlay playsInline className="w-full h-80 object-cover transform scale-x-[-1]" />
                 <canvas ref={canvasRef} className="hidden" />
-                <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4 px-4">
-                  <button type="button" onClick={closeCamera} className="px-4 py-2 bg-red-500/80 text-white rounded-full text-xs font-bold backdrop-blur-sm">Cancelar</button>
-                  <button type="button" onClick={capturePhoto} className="px-6 py-2 bg-white text-black rounded-full text-xs font-bold shadow-lg">Capturar</button>
+                <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4 px-4 z-10">
+                  <button type="button" onClick={closeCamera} className="px-6 py-2 bg-red-500/90 text-white rounded-full text-xs font-bold backdrop-blur-sm">Cancelar</button>
+                  <button type="button" onClick={capturePhoto} className="px-8 py-2 bg-white text-black rounded-full text-sm font-bold shadow-[0_0_20px_rgba(255,255,255,0.5)] transform active:scale-95 transition-transform">Capturar</button>
                 </div>
               </div>
             )}
           </div>
 
           <div className="space-y-2">
-            <Input label="Descríbete (Palabras Clave)" placeholder="ej. Techno, Tacos, Senderismo" value={traits} onChange={(e) => setTraits(e.target.value)} />
-            <textarea className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 min-h-[80px]" placeholder="Tu biografía aparecerá aquí..." value={bio} onChange={(e) => setBio(e.target.value)} required />
-            <Button type="button" variant="secondary" onClick={handleGenerateBio} isLoading={isGenerating} disabled={!name || !traits} className="text-xs py-2">✨ Generar Bio con IA</Button>
+            <Input label="Descríbete (3 palabras)" placeholder="ej. Techno, Tacos, Playa" value={traits} onChange={(e) => setTraits(e.target.value)} />
+            <div className="relative">
+                <textarea 
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-pink-500 min-h-[80px]" 
+                    placeholder="Tu biografía aparecerá aquí..." 
+                    value={bio} 
+                    onChange={(e) => setBio(e.target.value)} 
+                    required 
+                />
+                <Button 
+                    type="button" 
+                    variant="ghost" 
+                    onClick={handleGenerateBio} 
+                    isLoading={isGenerating} 
+                    disabled={!name || !traits} 
+                    className="absolute bottom-2 right-2 !w-auto !px-3 !py-1 text-[10px] bg-indigo-600/50 hover:bg-indigo-500 text-white rounded-lg border border-indigo-400/30"
+                >
+                    ✨ IA Mágica
+                </Button>
+            </div>
           </div>
 
           <Button type="submit" disabled={!photo || !name || !bio || isLoading} isLoading={isLoading}>
-            {isLoading ? 'Conectando...' : 'Entrar al Local'}
+            {isLoading ? 'Conectando...' : 'Entrar a la Fiesta 🎉'}
           </Button>
         </form>
       </div>
