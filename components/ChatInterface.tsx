@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { getWingmanSuggestion } from '../services/geminiService';
+import { getWingmanSuggestion, identifySong } from '../services/geminiService';
 
 export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
-  const { currentUser, matches, allUsers, messages, sendMessage } = useApp();
+  const { currentUser, matches, allUsers, messages, sendMessage, reportUser } = useApp();
   
   const [activePartnerId, setActivePartnerId] = useState<number | null>(() => {
     const stored = localStorage.getItem('neonmatch_open_chat');
@@ -18,20 +18,19 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [inputText, setInputText] = useState('');
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [isGettingSuggestion, setIsGettingSuggestion] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const [showTools, setShowTools] = useState(false);
-  const [enlargedImage, setEnlargedImage] = useState<string | null>(null); // State for lightbox
+  const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getPartnerId = (req: any) => req.fromId === currentUser?.id ? req.toId : req.fromId;
 
-  // Auto-select
   useEffect(() => {
     if (!activePartnerId && matches.length > 0) setActivePartnerId(getPartnerId(matches[0]));
   }, [matches, activePartnerId]);
 
-  // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activePartnerId]);
@@ -69,12 +68,50 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }
   };
 
-  const handleSendWhatsApp = () => {
-    const phone = prompt("Introduce tu número de WhatsApp (con prefijo):");
-    if (phone && activePartnerId) {
-       const link = `https://wa.me/${phone.replace('+', '')}`;
-       sendMessage(activePartnerId, `📞 ¡Hablemos por WhatsApp! ${link}`, "text");
-       setShowTools(false);
+  const handleReport = () => {
+      const reason = prompt("Describe el motivo del reporte (Spam, insultos, etc):");
+      if (reason && activePartnerId) {
+          reportUser(activePartnerId, reason);
+          alert("Usuario reportado. Un administrador revisará el chat.");
+          setShowTools(false);
+      }
+  };
+
+  const handleIdentifySong = async () => {
+    if (!activePartnerId) return;
+    setIsListening(true);
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        const chunks: Blob[] = [];
+
+        mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+        
+        mediaRecorder.onstop = async () => {
+            const blob = new Blob(chunks, { type: 'audio/mp3' });
+            // Convertir a base64
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = async () => {
+                const base64Audio = (reader.result as string).split(',')[1];
+                const songName = await identifySong(base64Audio);
+                if (window.confirm(`La IA dice que suena:\n\n"${songName}"\n\n¿Quieres dedicarla?`)) {
+                    sendMessage(activePartnerId, `🎧 Está sonando y te la dedico: ${songName}`, "dedication");
+                }
+                setIsListening(false);
+                setShowTools(false);
+            };
+            stream.getTracks().forEach(t => t.stop());
+        };
+
+        mediaRecorder.start();
+        // Grabar 5 segundos
+        setTimeout(() => mediaRecorder.stop(), 5000); 
+
+    } catch (e) {
+        console.error(e);
+        alert("Necesito permiso de micrófono para escuchar la canción.");
+        setIsListening(false);
     }
   };
 
@@ -102,17 +139,17 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           <button className="absolute top-4 right-4 text-white p-2 bg-slate-800 rounded-full z-50">✕</button>
           <img 
             src={enlargedImage} 
-            className="max-w-full max-h-full object-contain rounded-lg" 
+            className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" 
             alt="Ampliada"
-            onClick={(e) => e.stopPropagation()} // Prevent closing when clicking image
-            onContextMenu={(e) => e.preventDefault()} // Disable right click
+            onClick={(e) => e.stopPropagation()} 
+            onContextMenu={(e) => e.preventDefault()}
           />
         </div>
       )}
 
       {/* Header */}
       <div className="bg-slate-800 p-4 flex items-center gap-4 border-b border-slate-700 shadow-lg z-10">
-        <button onClick={onBack} className="text-slate-400 hover:text-white">
+        <button onClick={onBack} className="text-slate-400 hover:text-white transition-colors">
           <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
         </button>
         
@@ -123,7 +160,7 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             if (!p) return null;
             const isActive = pid === activePartnerId;
             return (
-              <div key={pid} onClick={() => setActivePartnerId(pid)} className={`flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer transition-all whitespace-nowrap ${isActive ? 'bg-pink-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+              <div key={pid} onClick={() => setActivePartnerId(pid)} className={`flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer transition-all whitespace-nowrap border ${isActive ? 'bg-pink-600 text-white border-pink-500 shadow-lg shadow-pink-500/30' : 'bg-slate-700 text-slate-300 border-slate-600 hover:bg-slate-600'}`}>
                  <div className="w-6 h-6 rounded-full overflow-hidden bg-slate-600"><img src={p.photoUrl || ''} className="w-full h-full object-cover" /></div>
                  <span className="text-sm font-bold">#{p.id}</span>
               </div>
@@ -137,7 +174,7 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         {activePartner ? (
           <>
              <div className="text-center py-6 opacity-50">
-                <div className="w-20 h-20 mx-auto rounded-full overflow-hidden mb-2"><img src={activePartner.photoUrl || ''} className="w-full h-full object-cover" /></div>
+                <div className="w-20 h-20 mx-auto rounded-full overflow-hidden mb-2 ring-4 ring-white/5"><img src={activePartner.photoUrl || ''} className="w-full h-full object-cover" /></div>
                 <p className="text-sm">Match con <span className="font-bold">{activePartner.name}</span></p>
              </div>
 
@@ -148,11 +185,11 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                
                return (
                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                   <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
+                   <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm shadow-md ${
                      isMe ? 'bg-gradient-to-r from-pink-500 to-violet-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 rounded-bl-none'
-                   } ${isDedication ? 'border-2 border-yellow-400 bg-slate-900 bg-none' : ''}`}>
+                   } ${isDedication ? 'border-2 border-yellow-400/50 bg-slate-900 bg-none' : ''}`}>
                      
-                     {isDedication && <div className="text-yellow-400 font-bold mb-1">🎵 Dedicatoria</div>}
+                     {isDedication && <div className="text-yellow-400 font-bold mb-1 flex items-center gap-1"><span>🎵</span> Dedicatoria</div>}
                      
                      {isImage ? (
                         msg.attachmentUrl ? (
@@ -164,14 +201,13 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                               onContextMenu={(e) => e.preventDefault()}
                             />
                             <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
-                              <span className="text-xs font-bold text-white bg-black/50 px-2 py-1 rounded-full">🔍 Ampliar</span>
+                              <span className="text-xs font-bold text-white bg-black/50 px-2 py-1 rounded-full">🔍 Ver</span>
                             </div>
                           </div>
-                        ) : <span className="italic opacity-70">Subiendo foto...</span>
+                        ) : <span className="italic opacity-70 flex items-center gap-2"><span className="animate-spin">⏳</span> Subiendo...</span>
                      ) : (
-                       // Detectar enlaces (como whatsapp)
                        msg.text.includes('https://') ? 
-                         <a href={msg.text.match(/https:\/\/[^\s]+/)?.[0]} target="_blank" className="underline hover:text-blue-300">{msg.text}</a> : 
+                         <a href={msg.text.match(/https:\/\/[^\s]+/)?.[0]} target="_blank" className="underline hover:text-blue-300 break-all">{msg.text}</a> : 
                          msg.text
                      )}
                    </div>
@@ -181,55 +217,63 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
              <div ref={messagesEndRef} />
           </>
         ) : (
-          <div className="flex h-full items-center justify-center text-slate-500">Selecciona un match</div>
+          <div className="flex h-full items-center justify-center text-slate-500">Selecciona un match arriba</div>
         )}
       </div>
 
       {/* Input Area */}
       {activePartner && (
-        <div className="p-4 bg-slate-800 border-t border-slate-700 relative">
+        <div className="p-4 bg-slate-800 border-t border-slate-700 relative z-20">
           
           {/* Tools Menu */}
           {showTools && (
-            <div className="absolute bottom-20 left-4 bg-slate-700 rounded-xl shadow-xl p-2 flex flex-col gap-2 animate-fade-in-up mb-2 z-20">
-              <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-600 rounded-lg text-white">
-                <span>📷</span> Enviar Foto
+            <div className="absolute bottom-20 left-4 bg-slate-700 rounded-xl shadow-2xl p-2 flex flex-col gap-2 animate-fade-in-up mb-2 z-30 w-52 border border-slate-600">
+              <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-3 px-3 py-3 hover:bg-slate-600 rounded-lg text-white text-xs font-bold text-left transition-colors">
+                <span className="text-lg">📷</span> Enviar Foto
               </button>
-              <button onClick={handleDedicateSong} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-600 rounded-lg text-yellow-300">
-                <span>🎵</span> Dedicar Canción
+              <button onClick={handleIdentifySong} disabled={isListening} className="flex items-center gap-3 px-3 py-3 hover:bg-slate-600 rounded-lg text-yellow-300 text-xs font-bold text-left transition-colors">
+                <span className="text-lg">{isListening ? '👂' : '🎵'}</span> {isListening ? 'Escuchando...' : 'Identificar Canción'}
               </button>
-              <button onClick={handleSendWhatsApp} className="flex items-center gap-2 px-4 py-2 hover:bg-slate-600 rounded-lg text-green-400">
-                <span>📞</span> Enviar WhatsApp
+              <button onClick={handleDedicateSong} className="flex items-center gap-3 px-3 py-3 hover:bg-slate-600 rounded-lg text-blue-300 text-xs font-bold text-left transition-colors">
+                <span className="text-lg">✍️</span> Dedicar Manualmente
+              </button>
+              <div className="h-px bg-slate-600 my-1"></div>
+              <button onClick={handleReport} className="flex items-center gap-3 px-3 py-3 hover:bg-red-500/20 rounded-lg text-red-400 text-xs font-bold text-left transition-colors">
+                <span className="text-lg">🚩</span> Reportar Usuario
               </button>
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
             </div>
           )}
 
           {suggestion && (
-            <div className="mb-3 animate-fade-in-up bg-indigo-900/50 border border-indigo-500/30 rounded-lg p-3 flex justify-between items-center">
+            <div className="mb-3 animate-fade-in-up bg-indigo-900/50 border border-indigo-500/30 rounded-lg p-3 flex justify-between items-center shadow-lg backdrop-blur-sm absolute bottom-full left-4 right-4 mb-2">
                 <p className="text-xs text-indigo-200 italic mr-2">" {suggestion} "</p>
-                <button onClick={() => { setInputText(suggestion); setSuggestion(null); }} className="text-xs font-bold text-indigo-400">Usar</button>
+                <button onClick={() => { setInputText(suggestion); setSuggestion(null); }} className="text-xs font-bold text-indigo-400 hover:text-white px-2 py-1 bg-indigo-800 rounded">Usar</button>
             </div>
           )}
 
           <div className="flex gap-2 items-center">
-             <button onClick={() => setShowTools(!showTools)} className={`p-2 rounded-full transition-colors ${showTools ? 'bg-pink-500 text-white' : 'bg-slate-700 text-slate-400'}`}>
-               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+             <button onClick={() => setShowTools(!showTools)} className={`p-2.5 rounded-full transition-colors ${showTools ? 'bg-pink-500 text-white shadow-lg shadow-pink-500/40' : 'bg-slate-700 text-slate-400 hover:text-white'}`}>
+               {showTools ? (
+                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+               ) : (
+                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+               )}
              </button>
 
-             <button onClick={handleWingman} disabled={isGettingSuggestion} className="p-2 rounded-full bg-slate-700 text-yellow-400">
+             <button onClick={handleWingman} disabled={isGettingSuggestion} className="p-2.5 rounded-full bg-slate-700 text-yellow-400 hover:bg-slate-600 transition-colors">
                {isGettingSuggestion ? <span className="animate-spin block">✨</span> : <span>✨</span>}
              </button>
              
              <input 
-               className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2 text-white focus:outline-none focus:border-pink-500"
+               className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2.5 text-white focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition-all placeholder-slate-600"
                placeholder="Escribe..."
                value={inputText}
                onChange={(e) => setInputText(e.target.value)}
                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
              />
              
-             <button onClick={() => handleSend()} disabled={!inputText.trim()} className="p-2 rounded-full bg-pink-600 text-white disabled:opacity-50">
+             <button onClick={() => handleSend()} disabled={!inputText.trim()} className="p-2.5 rounded-full bg-pink-600 text-white disabled:opacity-50 disabled:bg-slate-700 hover:bg-pink-500 shadow-lg shadow-pink-500/20 transition-all">
                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
              </button>
           </div>
