@@ -6,6 +6,9 @@ const MANUAL_URL = "https://edohesnkgnttbfsvaltj.supabase.co";
 const MANUAL_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkb2hlc25rZ250dGJmc3ZhbHRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyODA0ODIsImV4cCI6MjA3OTg1NjQ4Mn0.lVvsrH0WnBnQhpXMcHokPE1p5COmBZI0fFF8X1J8smg";
 // ----------------------------
 
+// Exportamos esta bandera para que el Dashboard sepa si usar enlace corto
+export const HAS_MANUAL_CONFIG = !!(MANUAL_URL && MANUAL_KEY);
+
 const STORAGE_KEY_URL = 'neonmatch_sb_url';
 const STORAGE_KEY_KEY = 'neonmatch_sb_key';
 
