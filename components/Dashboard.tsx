@@ -1,14 +1,20 @@
-
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Button } from './Button';
 import { Input } from './Input';
 import { getSupabaseConfig, generateInviteCode } from '../lib/supabase';
 
+const MASTER_PIN = "#31881985#";
+
+type SecurityAction = 
+  | { type: 'KICK_USER'; id: number; name: string }
+  | { type: 'KICK_ALL' }
+  | { type: 'RESET_EVENT' };
+
 export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ onViewChange }) => {
   const { 
     currentUser, sendLike, incomingLikes, respondToLike, matches, logout, allUsers, 
-    resetEvent, kickAllUsers, toggleEventStatus, eventStatus, coronateWinners, winners,
+    resetEvent, kickAllUsers, kickSpecificUser, toggleEventStatus, eventStatus, coronateWinners, winners,
     reports, resolveReport, messages
   } = useApp();
   const [targetId, setTargetId] = useState('');
@@ -23,6 +29,11 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
   const [baseUrlOverride, setBaseUrlOverride] = useState('');
   const [enlargedPhoto, setEnlargedPhoto] = useState<string | null>(null);
   const [viewingReport, setViewingReport] = useState<any | null>(null);
+  const [hearts, setHearts] = useState<{id: number, left: number, delay: number}[]>([]);
+
+  // Security Modal State
+  const [securityAction, setSecurityAction] = useState<SecurityAction | null>(null);
+  const [securityPin, setSecurityPin] = useState('');
 
   // Estados para temporizador
   const [startTime, setStartTime] = useState("18:00");
@@ -35,6 +46,28 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
     const voteParam = params.get('vote');
     if (voteParam) setTargetId(voteParam);
   }, []);
+
+  // AUTO-OPEN ADMIN PANEL si el usuario se llama Admin (ingreso por backdoor)
+  useEffect(() => {
+    if (currentUser && currentUser.name === 'Admin') {
+        setIsAdminPanelOpen(true);
+    }
+  }, [currentUser]);
+
+  // Efecto de corazones cuando hay ganadores
+  useEffect(() => {
+    if (winners) {
+        // Generar 50 corazones
+        const newHearts = Array.from({ length: 50 }).map((_, i) => ({
+            id: i,
+            left: Math.random() * 100, // posición horizontal %
+            delay: Math.random() * 5 // retraso en segundos
+        }));
+        setHearts(newHearts);
+    } else {
+        setHearts([]);
+    }
+  }, [winners]);
 
   // Lógica del Temporizador (Cliente Admin ejecuta el check)
   useEffect(() => {
@@ -71,12 +104,16 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
 
   if (!currentUser) return null;
 
-  const handleAdminLogin = () => {
-      // PIN por defecto para proteger el panel
-      if (adminPinInput === "1234") {
+  const handleAdminLogin = (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (adminPinInput === MASTER_PIN) {
           setIsAdminPanelOpen(true);
           setShowAdminLogin(false);
           setAdminPinInput("");
+          // Auto-scroll to panel for better UX
+          setTimeout(() => {
+             document.getElementById('admin-panel')?.scrollIntoView({ behavior: 'smooth' });
+          }, 100);
       } else {
           alert("PIN Incorrecto");
       }
@@ -100,17 +137,36 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
     onViewChange('chat');
   };
 
-  const handleResetEvent = async () => {
-    if (window.confirm("🔴 PELIGRO: Esto borrará TODOS los usuarios, matches y mensajes y expulsará a todos.\n\n¿Estás seguro?")) {
-      await resetEvent();
-    }
+  // --- LOGICA DE SEGURIDAD (PIN MAESTRO) ---
+
+  const initiateResetEvent = () => setSecurityAction({ type: 'RESET_EVENT' });
+  const initiateKickAll = () => setSecurityAction({ type: 'KICK_ALL' });
+  const initiateKickUser = (id: number, name: string) => setSecurityAction({ type: 'KICK_USER', id, name });
+
+  const confirmSecurityAction = async () => {
+      if (securityPin !== MASTER_PIN) {
+          alert("⛔ PIN Incorrecto. Acceso denegado.");
+          return;
+      }
+
+      if (securityAction?.type === 'RESET_EVENT') {
+          await resetEvent();
+          alert("✅ Evento reiniciado.");
+      } else if (securityAction?.type === 'KICK_ALL') {
+          await kickAllUsers();
+          alert("✅ Todos los usuarios expulsados.");
+      } else if (securityAction?.type === 'KICK_USER') {
+          await kickSpecificUser(securityAction.id);
+      }
+
+      // Cleanup
+      setSecurityAction(null);
+      setSecurityPin('');
   };
 
-  const handleKickAll = async () => {
-    if (window.confirm("¿Quieres cerrar la sesión de TODOS los usuarios conectados?")) {
-      await kickAllUsers();
-      alert("Señal de desconexión enviada.");
-    }
+  const closeSecurityModal = () => {
+      setSecurityAction(null);
+      setSecurityPin('');
   };
 
   const getPartnerId = (req: any) => req.fromId === currentUser.id ? req.toId : req.fromId;
@@ -127,14 +183,93 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
   return (
     <div className="max-w-md mx-auto min-h-screen pb-20 pt-6 px-4 space-y-6 relative">
       
+      {/* MODAL DE SEGURIDAD PARA LOGIN ADMIN */}
+      {showAdminLogin && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in-up">
+              <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl shadow-2xl w-full max-w-xs relative">
+                  <button onClick={() => setShowAdminLogin(false)} className="absolute top-3 right-3 text-slate-400 hover:text-white">✕</button>
+                  <h3 className="text-xl font-bold text-white mb-4 text-center">🔐 Acceso Master</h3>
+                  
+                  <form onSubmit={handleAdminLogin} className="space-y-4">
+                    <input 
+                        type="password" 
+                        placeholder="PIN MAESTRO" 
+                        autoFocus
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg py-3 px-4 text-center text-white text-lg tracking-[0.5em] focus:border-pink-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+                        value={adminPinInput} 
+                        onChange={e => setAdminPinInput(e.target.value)}
+                    />
+                    <button type="submit" className="w-full bg-pink-600 text-white py-3 rounded-lg font-bold hover:bg-pink-500 transition-all shadow-lg shadow-pink-500/20">
+                        Entrar
+                    </button>
+                  </form>
+              </div>
+          </div>
+      )}
+
+      {/* MODAL DE SEGURIDAD ACCIONES (KICK/RESET) */}
+      {securityAction && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in-up">
+              <div className="bg-slate-900 border-2 border-red-500/50 rounded-2xl p-6 w-full max-w-xs shadow-2xl relative">
+                  <button onClick={closeSecurityModal} className="absolute top-3 right-3 text-slate-400 hover:text-white">✕</button>
+                  
+                  <div className="text-center space-y-4">
+                      <div className="w-12 h-12 bg-red-900/30 rounded-full flex items-center justify-center mx-auto text-2xl border border-red-500/30">
+                          👮‍♂️
+                      </div>
+                      
+                      <div>
+                          <h3 className="text-lg font-bold text-white">Verificación Master</h3>
+                          <p className="text-xs text-red-300 font-bold mt-1">
+                              {securityAction.type === 'KICK_USER' && `Expulsar a ${securityAction.name}`}
+                              {securityAction.type === 'KICK_ALL' && "EXPULSAR A TODOS"}
+                              {securityAction.type === 'RESET_EVENT' && "BORRAR BASE DE DATOS"}
+                          </p>
+                      </div>
+
+                      <input 
+                        type="password" 
+                        placeholder="PIN MAESTRO" 
+                        autoFocus
+                        className="w-full bg-black/50 border border-slate-700 rounded-lg py-3 px-4 text-center text-white text-lg tracking-[0.5em] focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                        value={securityPin}
+                        onChange={(e) => setSecurityPin(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && confirmSecurityAction()}
+                      />
+
+                      <button 
+                        onClick={confirmSecurityAction}
+                        className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-600/20 transition-all"
+                      >
+                          CONFIRMAR ACCIÓN
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* ANIMACIÓN DE CORAZONES FLOTANTES (GLOBAL) */}
+      {winners && (
+        <div className="floating-hearts-container">
+            {hearts.map(h => (
+                <div 
+                    key={h.id} 
+                    className="heart" 
+                    style={{ left: `${h.left}%`, animationDuration: `${3 + Math.random() * 2}s`, animationDelay: `${h.delay}s` }}
+                >
+                    ❤️
+                </div>
+            ))}
+        </div>
+      )}
+
       {/* OVERLAY DE GANADORES (Rey y Reina) */}
       {winners && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4 animate-fade-in-up text-center">
-              <div className="space-y-6 relative">
-                   {/* Confetti effect could go here */}
+              <div className="space-y-6 relative z-50">
                   <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-t from-yellow-500/20 to-transparent blur-3xl pointer-events-none"></div>
                   
-                  <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-500 to-yellow-300 uppercase drop-shadow-[0_2px_10px_rgba(234,179,8,0.5)]">
+                  <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-500 to-yellow-300 uppercase drop-shadow-[0_2px_10px_rgba(234,179,8,0.5)] animate-bounce">
                       👑 Reyes de la Pista 👑
                   </h1>
                   
@@ -202,9 +337,6 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
                             </div>
                         </div>
                     ))}
-                    {messages.filter(m => (m.senderId === viewingReport.reporterId && m.receiverId === viewingReport.reportedId) || (m.senderId === viewingReport.reportedId && m.receiverId === viewingReport.reporterId)).length === 0 && (
-                        <p className="text-slate-500 italic text-center py-4">No hay mensajes previos entre estos usuarios.</p>
-                    )}
                   </div>
               </div>
 
@@ -212,8 +344,8 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
                   <button onClick={() => { resolveReport(viewingReport.id); setViewingReport(null); }} className="bg-green-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-green-500 transition-colors">
                       ✅ Marcar Resuelto
                   </button>
-                  <button onClick={() => { kickAllUsers(); setViewingReport(null); }} className="bg-red-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-red-500 transition-colors">
-                      🛑 Echar a Todos (Nuclear)
+                  <button onClick={() => { initiateKickAll(); setViewingReport(null); }} className="bg-red-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-red-500 transition-colors">
+                      🛑 Echar a Todos
                   </button>
               </div>
           </div>
@@ -352,27 +484,9 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
            </button>
         )}
 
-        {/* Login Admin PIN */}
-        {showAdminLogin && (
-            <div className="max-w-xs mx-auto space-y-3 mb-4 bg-slate-900 p-4 rounded-xl border border-slate-800 animate-fade-in-up">
-                <p className="text-xs text-white font-bold">Introduce PIN de Seguridad</p>
-                <input 
-                    type="password" 
-                    placeholder="PIN (1234)" 
-                    className="w-full p-2 rounded bg-slate-950 text-white text-center border border-slate-700 tracking-widest text-lg" 
-                    value={adminPinInput} 
-                    onChange={e => setAdminPinInput(e.target.value)}
-                />
-                <div className="flex gap-2">
-                    <button onClick={handleAdminLogin} className="flex-1 bg-pink-600 text-white p-2 rounded text-xs font-bold hover:bg-pink-500">Entrar</button>
-                    <button onClick={() => setShowAdminLogin(false)} className="flex-1 bg-slate-700 text-white p-2 rounded text-xs hover:bg-slate-600">Cancelar</button>
-                </div>
-            </div>
-        )}
-
         {/* PANEL DE ADMINISTRADOR */}
         {isAdminPanelOpen && (
-           <div className="bg-slate-900 border border-indigo-500/50 rounded-xl p-4 mt-4 text-left shadow-2xl ring-1 ring-indigo-500/20">
+           <div id="admin-panel" className="bg-slate-900 border border-indigo-500/50 rounded-xl p-4 mt-4 text-left shadow-2xl ring-1 ring-indigo-500/20 animate-fade-in-up">
               <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-2">
                 <p className="text-indigo-400 font-black text-sm uppercase tracking-wider flex items-center gap-2">
                    🛠️ Panel de Control
@@ -420,17 +534,32 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
               {/* EVENT STATUS */}
               <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-wider opacity-70">Control Manual</h4>
               <div className="flex gap-2 mb-6">
-                <button onClick={() => toggleEventStatus('open')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${eventStatus === 'open' ? 'bg-green-500 text-white shadow-lg shadow-green-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>ABRIR LOCAL</button>
-                <button onClick={() => toggleEventStatus('closed')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${eventStatus === 'closed' ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>CERRAR LOCAL</button>
+                <button onClick={() => toggleEventStatus('open')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${eventStatus === 'open' ? 'bg-green-500 text-white shadow-lg shadow-green-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>🌤️ LEVANTAR PERSIANA</button>
+                <button onClick={() => toggleEventStatus('closed')} className={`flex-1 py-3 rounded-lg text-xs font-bold transition-all ${eventStatus === 'closed' ? 'bg-red-500 text-white shadow-lg shadow-red-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>🔒 CERRAR LOCAL</button>
               </div>
 
-              {/* FOTOS DE USUARIOS */}
-              <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-wider opacity-70">Moderación Visual</h4>
-              <div className="grid grid-cols-5 gap-1 mb-6 max-h-48 overflow-y-auto bg-slate-950 p-2 rounded-lg border border-slate-800">
+              {/* FOTOS DE USUARIOS Y KICK MANUAL */}
+              <h4 className="text-xs font-bold text-white mb-2 uppercase tracking-wider opacity-70">Moderación Visual (Tocar 'X' para echar)</h4>
+              <div className="grid grid-cols-5 gap-2 mb-6 max-h-52 overflow-y-auto bg-slate-950 p-2 rounded-lg border border-slate-800">
                  {allUsers.map(u => (
-                     <div key={u.id} className="relative cursor-pointer group aspect-square" onClick={() => setEnlargedPhoto(u.photoUrl)}>
-                         <img src={u.photoUrl || ''} className="w-full h-full object-cover rounded-md border border-slate-700 group-hover:border-white transition-colors" />
-                         <span className="absolute bottom-0 right-0 bg-black/80 text-white text-[8px] px-1 rounded-tl-md">#{u.id}</span>
+                     <div key={u.id} className="relative group aspect-square">
+                         <img 
+                           src={u.photoUrl || ''} 
+                           className="w-full h-full object-cover rounded-md border border-slate-700 cursor-pointer" 
+                           onClick={() => setEnlargedPhoto(u.photoUrl)}
+                         />
+                         <span className="absolute bottom-0 left-0 bg-black/80 text-white text-[8px] px-1 rounded-tr-md">#{u.id}</span>
+                         
+                         {/* BOTÓN ECHAR INDIVIDUAL (Fixed styling) */}
+                         <div 
+                           onClick={(e) => { e.stopPropagation(); initiateKickUser(u.id, u.name); }}
+                           className="absolute top-1 right-1 w-7 h-7 bg-red-600 rounded-full flex items-center justify-center cursor-pointer shadow-lg z-30 hover:bg-red-500 active:scale-95 border-2 border-slate-900"
+                           title="Expulsar"
+                         >
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white font-bold" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                           </svg>
+                         </div>
                      </div>
                  ))}
                  {allUsers.length === 0 && <p className="col-span-5 text-center text-[10px] text-slate-600 py-4">Sin usuarios</p>}
@@ -442,11 +571,11 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
                 👑 Coronar Rey y Reina
               </button>
               <div className="grid grid-cols-2 gap-2">
-                  <button onClick={handleKickAll} className="w-full py-3 bg-slate-700 text-white font-bold rounded-lg text-xs hover:bg-slate-600 border border-slate-600">
-                    🚪 Echar a Todos
+                  <button onClick={initiateKickAll} className="w-full py-3 bg-slate-700 text-white font-bold rounded-lg text-xs hover:bg-slate-600 border border-slate-600">
+                    🛑 Echar a Todos
                   </button>
-                  <button onClick={handleResetEvent} className="w-full py-3 bg-red-600/20 text-red-500 border border-red-500/50 font-bold rounded-lg text-xs hover:bg-red-600/30">
-                    ⚠️ BORRAR DB
+                  <button onClick={initiateResetEvent} className="w-full py-3 bg-red-600/20 text-red-500 border border-red-500/50 font-bold rounded-lg text-xs hover:bg-red-600/30">
+                    ♻️ REINICIAR EVENTO
                   </button>
               </div>
            </div>
