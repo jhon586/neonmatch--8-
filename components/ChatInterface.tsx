@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { getWingmanSuggestion, identifySong } from '../services/geminiService';
+import { getWingmanSuggestion } from '../services/geminiService';
 
 export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const { currentUser, matches, allUsers, messages, sendMessage, reportUser } = useApp();
@@ -16,9 +15,7 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   });
 
   const [inputText, setInputText] = useState('');
-  const [suggestion, setSuggestion] = useState<string | null>(null);
   const [isGettingSuggestion, setIsGettingSuggestion] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [showTools, setShowTools] = useState(false);
   const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
   
@@ -48,7 +45,6 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     if ((!text.trim() && type !== 'image') || !activePartnerId) return;
     sendMessage(activePartnerId, text, type);
     setInputText('');
-    setSuggestion(null);
     setShowTools(false);
   };
 
@@ -77,54 +73,20 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       }
   };
 
-  const handleIdentifySong = async () => {
-    if (!activePartnerId) return;
-    setIsListening(true);
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const mediaRecorder = new MediaRecorder(stream);
-        const chunks: Blob[] = [];
-
-        mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-        
-        mediaRecorder.onstop = async () => {
-            const blob = new Blob(chunks, { type: 'audio/mp3' });
-            // Convertir a base64
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = async () => {
-                const base64Audio = (reader.result as string).split(',')[1];
-                const songName = await identifySong(base64Audio);
-                if (window.confirm(`La IA dice que suena:\n\n"${songName}"\n\n¿Quieres dedicarla?`)) {
-                    sendMessage(activePartnerId, `🎧 Está sonando y te la dedico: ${songName}`, "dedication");
-                }
-                setIsListening(false);
-                setShowTools(false);
-            };
-            stream.getTracks().forEach(t => t.stop());
-        };
-
-        mediaRecorder.start();
-        // Grabar 5 segundos
-        setTimeout(() => mediaRecorder.stop(), 5000); 
-
-    } catch (e) {
-        console.error(e);
-        alert("Necesito permiso de micrófono para escuchar la canción.");
-        setIsListening(false);
-    }
-  };
-
   const handleWingman = async () => {
     if (!activePartner) return;
     setIsGettingSuggestion(true);
-    const lastMsgs = currentChatMessages.slice(-5).map(m => ({
+    // Recopilar contexto
+    const lastMsgs = currentChatMessages.slice(-6).map(m => ({
       sender: m.senderId === currentUser.id ? 'Yo' : 'Ella/Él',
       text: m.text
     }));
     
-    const sug = await getWingmanSuggestion(currentUser.bio, activePartner.bio, lastMsgs);
-    setSuggestion(sug);
+    // Llamada a IA
+    const suggestion = await getWingmanSuggestion(currentUser.bio, activePartner.bio, lastMsgs);
+    
+    // Insertar directamente en el input para que el usuario pueda editar
+    setInputText(suggestion);
     setIsGettingSuggestion(false);
   };
 
@@ -231,9 +193,6 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-3 px-3 py-3 hover:bg-slate-600 rounded-lg text-white text-xs font-bold text-left transition-colors">
                 <span className="text-lg">📷</span> Enviar Foto
               </button>
-              <button onClick={handleIdentifySong} disabled={isListening} className="flex items-center gap-3 px-3 py-3 hover:bg-slate-600 rounded-lg text-yellow-300 text-xs font-bold text-left transition-colors">
-                <span className="text-lg">{isListening ? '👂' : '🎵'}</span> {isListening ? 'Escuchando...' : 'Identificar Canción'}
-              </button>
               <button onClick={handleDedicateSong} className="flex items-center gap-3 px-3 py-3 hover:bg-slate-600 rounded-lg text-blue-300 text-xs font-bold text-left transition-colors">
                 <span className="text-lg">✍️</span> Dedicar Manualmente
               </button>
@@ -245,11 +204,18 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </div>
           )}
 
-          {suggestion && (
-            <div className="mb-3 animate-fade-in-up bg-indigo-900/50 border border-indigo-500/30 rounded-lg p-3 flex justify-between items-center shadow-lg backdrop-blur-sm absolute bottom-full left-4 right-4 mb-2">
-                <p className="text-xs text-indigo-200 italic mr-2">" {suggestion} "</p>
-                <button onClick={() => { setInputText(suggestion); setSuggestion(null); }} className="text-xs font-bold text-indigo-400 hover:text-white px-2 py-1 bg-indigo-800 rounded">Usar</button>
-            </div>
+          {/* Botón Flotante IA Suggestion */}
+          {!isGettingSuggestion && (
+            <button 
+                onClick={handleWingman} 
+                className="absolute -top-10 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg hover:scale-105 transition-transform animate-pulse flex items-center gap-2 border border-white/20"
+            >
+                {inputText ? (
+                    <><span>🔄</span> Probar otra frase</>
+                ) : (
+                    <><span>✨</span> ¿Qué le digo? (IA)</>
+                )}
+            </button>
           )}
 
           <div className="flex gap-2 items-center">
@@ -261,16 +227,20 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
                )}
              </button>
 
-             <button onClick={handleWingman} disabled={isGettingSuggestion} className="p-2.5 rounded-full bg-slate-700 text-yellow-400 hover:bg-slate-600 transition-colors">
-               {isGettingSuggestion ? <span className="animate-spin block">✨</span> : <span>✨</span>}
-             </button>
+             {/* Indicador de carga IA en el botón secundario */}
+             {isGettingSuggestion && (
+                 <div className="p-2.5 bg-slate-700 rounded-full animate-spin text-yellow-400">
+                     ✨
+                 </div>
+             )}
              
              <input 
                className="flex-1 bg-slate-900 border border-slate-700 rounded-full px-4 py-2.5 text-white focus:outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 transition-all placeholder-slate-600"
-               placeholder="Escribe..."
+               placeholder={isGettingSuggestion ? "La IA está pensando..." : "Escribe..."}
                value={inputText}
                onChange={(e) => setInputText(e.target.value)}
                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+               disabled={isGettingSuggestion}
              />
              
              <button onClick={() => handleSend()} disabled={!inputText.trim()} className="p-2.5 rounded-full bg-pink-600 text-white disabled:opacity-50 disabled:bg-slate-700 hover:bg-pink-500 shadow-lg shadow-pink-500/20 transition-all">
@@ -281,4 +251,4 @@ export const ChatInterface: React.FC<{ onBack: () => void }> = ({ onBack }) => {
       )}
     </div>
   );
-};
+}
