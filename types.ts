@@ -36,4 +36,3 @@ export interface Report {
 export type AppView = 'onboarding' | 'dashboard' | 'chat';
 
 export type EventStatus = 'open' | 'closed';
-

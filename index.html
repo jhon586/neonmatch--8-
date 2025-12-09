@@ -16,8 +16,43 @@
       .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       .animate-fade-in-up { animation: fadeInUp 0.5s ease-out; }
       @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+      /* Animación Corazones Flotantes */
+      .floating-hearts-container {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 40;
+        overflow: hidden;
+      }
+      .heart {
+        position: absolute;
+        bottom: -50px;
+        font-size: 2rem;
+        animation: floatUp linear forwards;
+        opacity: 0;
+      }
+      @keyframes floatUp {
+        0% { transform: translateY(0) scale(0.5); opacity: 0; }
+        10% { opacity: 1; }
+        100% { transform: translateY(-120vh) scale(1.5) rotate(20deg); opacity: 0; }
+      }
     </style>
-  </head>
+<script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
+    "react/": "https://aistudiocdn.com/react@^19.2.1/",
+    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+    "vite": "https://aistudiocdn.com/vite@^7.2.6",
+    "@supabase/supabase-js": "https://aistudiocdn.com/@supabase/supabase-js@^2.86.2",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
   <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
