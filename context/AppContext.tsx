@@ -1,5 +1,4 @@
-
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { User, MatchRequest, Message, EventStatus, Report } from '../types';
 import { createSupabaseClient, getSupabaseConfig, saveSupabaseConfig } from '../lib/supabase';
 
@@ -26,6 +25,7 @@ interface AppContextType {
   // Admin Functions
   resetEvent: () => Promise<void>;
   kickAllUsers: () => Promise<void>;
+  kickSpecificUser: (targetId: number) => Promise<void>;
   toggleEventStatus: (status: EventStatus) => Promise<void>;
   coronateWinners: () => Promise<void>;
   resolveReport: (reportId: string) => Promise<void>;
@@ -47,6 +47,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [eventStatus, setEventStatus] = useState<EventStatus>('open');
   const [winners, setWinners] = useState<{ king: User | null; queen: User | null } | null>(null);
 
+  const commandChannelRef = useRef<any>(null);
+  // Keep track of kicked simulated IDs so they don't respawn on refetch
+  const kickedSimulatedIdsRef = useRef<Set<number>>(new Set());
+
   const configureServer = (url: string, key: string) => {
     saveSupabaseConfig(url.trim(), key.trim());
     const newClient = createSupabaseClient();
@@ -54,17 +58,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsConfigured(!!newClient);
   };
 
-  // LOGOUT AHORA BORRA EL USUARIO PARA RECICLAR EL NÚMERO
-  // Si el usuario 4 se va, el 4 queda libre para el siguiente.
   const logout = async () => {
-    if (currentUser && supabase) {
-        // Borrar usuario de la DB para liberar ID
-        await supabase.from('users').delete().eq('id', currentUser.id);
-        // Opcional: Borrar matches relacionados para limpiar
-        await supabase.from('matches').delete().or(`from_id.eq.${currentUser.id},to_id.eq.${currentUser.id}`);
-    }
+    // Limpieza local inmediata
     setCurrentUser(null);
     localStorage.removeItem(SESSION_USER_ID_KEY);
+    
+    // Si hay conexión, intentar limpiar rastro en DB (opcional, el admin suele hacerlo)
+    if (currentUser && supabase) {
+        try {
+            // No bloqueamos el logout por fallos de DB
+            supabase.from('matches').delete().or(`from_id.eq.${currentUser.id},to_id.eq.${currentUser.id}`).then(() => {});
+            supabase.from('users').delete().eq('id', currentUser.id).then(() => {});
+        } catch (e) {
+            console.error("Logout cleanup error", e);
+        }
+    }
     window.location.reload();
   };
 
@@ -77,13 +85,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const { data: usersData } = await supabase.from('users').select('*').order('id', { ascending: true });
       if (usersData) {
-        const mappedUsers = usersData.map((u: any) => ({
+        let mappedUsers = usersData.map((u: any) => ({
           id: u.id,
           name: u.name,
           bio: u.bio,
           photoUrl: u.photo_url,
           joinedAt: u.joined_at
         }));
+
+        // --- SIMULATED USERS INJECTION (For Testing) ---
+        const simulatedUsers: User[] = [
+            {
+                id: 68,
+                name: "Elena (Sim)",
+                bio: "Viviendo la vida loca. 💃",
+                photoUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=300&q=80",
+                joinedAt: Date.now()
+            },
+            {
+                id: 79,
+                name: "Marcos (Sim)",
+                bio: "Busco a mi player 2. 🎮",
+                photoUrl: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=300&q=80",
+                joinedAt: Date.now()
+            }
+        ];
+
+        // Add simulated users if they don't exist in DB data AND haven't been kicked locally
+        simulatedUsers.forEach(sim => {
+            if (!mappedUsers.some((u: User) => u.id === sim.id) && !kickedSimulatedIdsRef.current.has(sim.id)) {
+                mappedUsers.push(sim);
+            }
+        });
+        
+        // Re-sort by ID
+        mappedUsers.sort((a: User, b: User) => a.id - b.id);
+
         setAllUsers(mappedUsers);
 
         const storedId = localStorage.getItem(SESSION_USER_ID_KEY);
@@ -91,7 +128,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const found = mappedUsers.find((u: User) => u.id === parseInt(storedId));
           if (found) setCurrentUser(found);
           else {
-            // Si tengo ID local pero no está en la base de datos (fue borrado/reciclado), hacer logout forzoso
+             // Si tengo ID guardado pero no estoy en la DB, me han borrado.
              localStorage.removeItem(SESSION_USER_ID_KEY);
              setCurrentUser(null);
           }
@@ -124,20 +161,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     fetchData();
 
-    // CANALES DE TIEMPO REAL
     const commandChannel = supabase.channel('global_commands')
       .on('broadcast', { event: 'force_logout' }, () => {
-        logout();
+        // Escuchar orden de desalojo total
+        console.log("Recibida orden de desalojo total");
+        localStorage.removeItem(SESSION_USER_ID_KEY);
+        window.location.reload();
+      })
+      .on('broadcast', { event: 'force_logout_specific' }, (payload: any) => {
+         // Escuchar orden de desalojo personal
+         const myId = parseInt(localStorage.getItem(SESSION_USER_ID_KEY) || '0');
+         if (payload.payload && payload.payload.targetId === myId) {
+             alert("Has sido expulsado de la fiesta.");
+             localStorage.removeItem(SESSION_USER_ID_KEY);
+             window.location.reload();
+         }
       })
       .on('broadcast', { event: 'coronation' }, (payload: any) => {
          setWinners(payload.payload);
-         setTimeout(() => setWinners(null), 15000); // Mostrar ganadores por 15 segundos
+         setTimeout(() => setWinners(null), 15000); 
       })
       .on('broadcast', { event: 'new_report' }, (payload: any) => {
-         // Añadir reporte al estado local (visible solo para admin)
          setReports(prev => [...prev, payload.payload]);
       })
       .subscribe();
+    
+    commandChannelRef.current = commandChannel;
 
     const dbChannel = supabase.channel('public_db_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => fetchData())
@@ -166,37 +215,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => { 
       supabase.removeChannel(commandChannel);
-      supabase.removeChannel(dbChannel); 
+      supabase.removeChannel(dbChannel);
+      commandChannelRef.current = null;
     };
   }, [supabase]);
 
-  // REGISTRO CON RECICLAJE DE IDs (RELLENAR HUECOS)
   const register = async (name: string, bio: string, photoUrl: string | null) => {
     if (!supabase) return;
     setIsLoading(true);
 
-    // 1. Obtener todos los IDs actuales ordenados para buscar el primer hueco libre
     const { data: existingUsers } = await supabase.from('users').select('id').order('id', { ascending: true });
     
     let newId = 1;
     if (existingUsers && existingUsers.length > 0) {
         const ids = existingUsers.map((u: any) => u.id);
-        // Algoritmo: Buscar el primer entero i que no coincida con ids[i-1]
-        // Ejemplo: [1, 2, 4] -> Falta el 3.
         for (let i = 0; i < ids.length; i++) {
             if (ids[i] !== i + 1) {
-                newId = i + 1; // Encontramos un hueco
+                newId = i + 1; 
                 break;
             }
         }
-        // Si no se rompió el bucle, significa que están todos seguidos (1,2,3), así que tomamos el siguiente (4)
-        if (newId === 1 && ids[0] === 1 && ids[ids.length - 1] === ids.length) {
+        if (newId === 1 && ids.length > 0 && ids[0] === 1 && ids[ids.length - 1] === ids.length) {
             newId = ids.length + 1;
         }
     }
 
-    // Insertar forzando el ID. 
-    // NOTA: Esto requiere que la columna ID en Supabase sea 'generated by default as identity', no 'always'.
     const { data, error } = await supabase.from('users').insert([{ 
         id: newId,
         name, 
@@ -205,8 +248,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }]).select().single();
 
     if (error) {
-        console.error("Error creating user with recycled ID:", error);
-        alert("Error al asignar número. Inténtalo de nuevo.");
+        console.error("Error creating user:", error);
+        alert("Error al registrarse. Inténtalo de nuevo.");
         setIsLoading(false);
         return;
     }
@@ -222,7 +265,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const reportUser = async (reportedId: number, reason: string) => {
       if (!currentUser || !supabase) return;
-      
       const report: Report = {
           id: Date.now().toString(),
           reporterId: currentUser.id,
@@ -231,15 +273,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           timestamp: Date.now(),
           status: 'pending'
       };
-
-      // Enviar a canal de admin (Broadcast para que le salga la notificación al admin conectado)
-      await supabase.channel('global_commands').send({
+      // Enviar señal a admins
+      const channel = commandChannelRef.current || supabase.channel('global_commands');
+      await channel.send({
           type: 'broadcast',
           event: 'new_report',
           payload: report
       });
-      
-      // En una app real, guardaríamos esto en una tabla 'reports'.
   };
 
   const resolveReport = async (reportId: string) => {
@@ -248,68 +288,118 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // --- ADMIN FUNCTIONS ---
 
-  const resetEvent = async () => {
-    if (!supabase) return;
-    setIsLoading(true);
-    await kickAllUsers();
-    
-    // Limpieza manual de tablas
-    await supabase.from('messages').delete().neq('id', 0);
-    await supabase.from('matches').delete().neq('id', 0);
-    await supabase.from('users').delete().neq('id', 0);
-    
+  const kickSpecificUser = async (targetId: number) => {
+      // 1. OPTIMISTIC UPDATE: Update UI immediately
+      setAllUsers(prev => prev.filter(u => u.id !== targetId));
+      kickedSimulatedIdsRef.current.add(targetId);
+
+      if (!supabase) return;
+
+      try {
+          const channel = commandChannelRef.current || supabase.channel('global_commands');
+          // Broadcast eviction to trigger logout on client side
+          channel.send({
+              type: 'broadcast',
+              event: 'force_logout_specific',
+              payload: { targetId }
+          }).catch((err: any) => console.error("Broadcast error (non-fatal):", err));
+
+          // 2. DATABASE: Clean up in background
+          await supabase.from('messages').delete().or(`sender_id.eq.${targetId},receiver_id.eq.${targetId}`);
+          await supabase.from('matches').delete().or(`from_id.eq.${targetId},to_id.eq.${targetId}`);
+          await supabase.from('users').delete().eq('id', targetId);
+      } catch (e) {
+          console.warn("DB Cleanup warning (ignoring as UI is updated):", e);
+      }
+  };
+
+  const kickAllUsers = async () => {
+    // 1. OPTIMISTIC UPDATE: Clear everything immediately
     setAllUsers([]);
     setMatchRequests([]);
     setMessages([]);
     setReports([]);
-    setCurrentUser(null);
-    setIsLoading(false);
-    window.location.reload();
+    
+    // Prevent simulated users from respawning
+    [68, 79].forEach(id => kickedSimulatedIdsRef.current.add(id));
+    
+    if (!supabase) return;
+    
+    try {
+        const channel = commandChannelRef.current || supabase.channel('global_commands');
+        channel.send({
+            type: 'broadcast',
+            event: 'force_logout',
+            payload: {}
+        }).catch((err: any) => console.error("Broadcast error (non-fatal):", err));
+
+        // 2. DATABASE: Mass delete
+        await supabase.from('messages').delete().gt('id', 0); 
+        await supabase.from('matches').delete().gt('id', 0);
+        await supabase.from('users').delete().gt('id', 0);
+    } catch (e) {
+        console.error("Error borrando DB (ignoring as UI is updated):", e);
+    }
   };
 
-  const kickAllUsers = async () => {
-    if (!supabase) return;
-    await supabase.channel('global_commands').send({
-      type: 'broadcast',
-      event: 'force_logout',
-      payload: {}
-    });
+  const resetEvent = async () => {
+    // Optimistic clear
+    setAllUsers([]);
+    if (!supabase) {
+       window.location.reload();
+       return;
+    }
+    
+    try {
+        await kickAllUsers(); // Also handles local state clear
+        await supabase.from('system_settings').delete().neq('key', 'keep_alive');
+        window.location.reload();
+    } catch (e) {
+        console.error("Error resetting DB:", e);
+        // Ensure UI reload even on error
+        window.location.reload();
+    }
   };
 
   const toggleEventStatus = async (status: EventStatus) => {
     if (!supabase) return;
-    // Usamos upsert para actualizar o crear la configuración
+    setEventStatus(status); // Optimistic UI
+    
     await supabase.from('system_settings').upsert({ key: 'event_status', value: status });
-    setEventStatus(status);
+    
+    if (status === 'closed') {
+        // Opcional: Echar a todos al cerrar
+        await kickAllUsers();
+    }
   };
 
   const coronateWinners = async () => {
-      // 1. Contar likes recibidos (incoming likes accepted or pending)
       const likeCounts: { [key: number]: number } = {};
-      
       matchRequests.forEach(m => {
           likeCounts[m.toId] = (likeCounts[m.toId] || 0) + 1;
       });
 
-      // 2. Ordenar usuarios por likes descendente
       const sortedUsers = [...allUsers].sort((a, b) => {
           return (likeCounts[b.id] || 0) - (likeCounts[a.id] || 0);
       });
 
       if (sortedUsers.length < 2) {
-          alert("No hay suficientes usuarios para elegir Reyes.");
+          alert("Necesitas al menos 2 usuarios con votos.");
           return;
       }
 
-      // 3. Elegir top 2
       const k = sortedUsers[0];
       const q = sortedUsers[1];
+      const payload = { king: k, queen: q };
 
-      // 4. Emitir evento global
-      await supabase.channel('global_commands').send({
+      setWinners(payload);
+      setTimeout(() => setWinners(null), 15000);
+
+      const channel = commandChannelRef.current || supabase.channel('global_commands');
+      await channel.send({
           type: 'broadcast',
           event: 'coronation',
-          payload: { king: k, queen: q }
+          payload: payload
       });
   };
 
@@ -383,7 +473,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider value={{
       currentUser, allUsers, incomingLikes, matches, messages, reports, isLoading, isConfigured, eventStatus, winners,
-      register, sendLike, respondToLike, sendMessage, reportUser, logout, resetEvent, configureServer, kickAllUsers, toggleEventStatus, coronateWinners, resolveReport
+      register, sendLike, respondToLike, sendMessage, reportUser, logout, resetEvent, configureServer, kickAllUsers, kickSpecificUser, toggleEventStatus, coronateWinners, resolveReport
     }}>
       {children}
     </AppContext.Provider>
