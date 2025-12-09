@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { Button } from './Button';
 import { Input } from './Input';
-import { getSupabaseConfig, generateInviteCode } from '../lib/supabase';
+import { getSupabaseConfig, generateInviteCode, HAS_MANUAL_CONFIG } from '../lib/supabase';
 
 const MASTER_PIN = "#31881985#";
 
@@ -41,9 +41,9 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
   const [timerEnabled, setTimerEnabled] = useState(false);
 
   useEffect(() => {
-    // Si estamos en localhost, sugerimos el dominio de producción por defecto
+    // Si estamos en localhost, usamos el dominio de producción para que el QR sea útil inmediatamente
     if (window.location.hostname.includes('localhost')) {
-        setBaseUrlOverride('https://www.fiesta-match.com');
+        setBaseUrlOverride('https://neonmatchis.netlify.app');
     } else {
         setBaseUrlOverride(window.location.origin + window.location.pathname);
     }
@@ -186,12 +186,16 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
   const getPartnerId = (req: any) => req.fromId === currentUser.id ? req.toId : req.fromId;
   const config = getSupabaseConfig();
   const cleanBaseUrl = baseUrlOverride.replace(/\/$/, '');
-  const inviteCode = config ? generateInviteCode(config.url, config.key) : '';
-  // Si no hay invite code (ya configurado en hardcode), el QR es solo la URL limpia
-  const magicLink = inviteCode ? `${cleanBaseUrl}?invite=${encodeURIComponent(inviteCode)}` : cleanBaseUrl;
+  
+  // --- LÓGICA DE URL CORTA ---
+  // Si tenemos configuración manual (fija), usamos solo la URL base limpia.
+  // Si no, generamos el invite code largo para que la gente se pueda conectar.
+  const inviteCode = (!HAS_MANUAL_CONFIG && config) ? generateInviteCode(config.url, config.key) : '';
+  const magicLink = (HAS_MANUAL_CONFIG) ? cleanBaseUrl : (inviteCode ? `${cleanBaseUrl}?invite=${encodeURIComponent(inviteCode)}` : cleanBaseUrl);
+  
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(magicLink)}`;
 
-  const whatsappMessage = `¡Únete a la fiesta! 🥂 Escanea o pulsa aquí para entrar y conseguir tu número: ${magicLink}`;
+  const whatsappMessage = `¡Únete a la fiesta! 🥂 Entra aquí para conseguir tu número: ${magicLink}`;
   const shareViaWhatsApp = () => window.open(`https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`, '_blank');
   const copyToClipboard = () => { navigator.clipboard.writeText(magicLink); alert("¡Enlace copiado!"); };
 
@@ -365,7 +369,7 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
                             </div>
                         </div>
                     ))}
-                    {messages.filter(m => (m.senderId === viewingReport.reporterId && m.receiverId === viewingReport.reportedId) || (m.senderId === viewingReport.reportedId && m.receiverId === viewingReport.reporterId)).length === 0 && (
+                    {messages.filter(m => (m.senderId === viewingReport.reporterId && m.receiverId === viewingReport.reportedId) || (m.senderId === viewingReport.reportedId && m.receiverId === viewingReport.reportedId)).length === 0 && (
                         <p className="text-center text-slate-500 text-sm mt-4">No hay mensajes previos.</p>
                     )}
                   </div>
