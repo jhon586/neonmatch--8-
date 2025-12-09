@@ -26,6 +26,7 @@ interface AppContextType {
   resetEvent: () => Promise<void>;
   kickAllUsers: () => Promise<void>;
   kickSpecificUser: (targetId: number) => Promise<void>;
+  removeMatch: (user1Id: number, user2Id: number) => Promise<void>;
   toggleEventStatus: (status: EventStatus) => Promise<void>;
   coronateWinners: () => Promise<void>;
   resolveReport: (reportId: string) => Promise<void>;
@@ -313,6 +314,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
   };
 
+  const removeMatch = async (user1Id: number, user2Id: number) => {
+      // 1. Optimistic Update
+      setMatchRequests(prev => prev.filter(m => 
+          !((m.fromId === user1Id && m.toId === user2Id) || (m.fromId === user2Id && m.toId === user1Id))
+      ));
+      
+      if (!supabase) return;
+      
+      // 2. DB Update
+      try {
+          await supabase.from('matches').delete().or(`and(from_id.eq.${user1Id},to_id.eq.${user2Id}),and(from_id.eq.${user2Id},to_id.eq.${user1Id})`);
+      } catch(e) {
+          console.error("Error removing match", e);
+      }
+  };
+
   const kickAllUsers = async () => {
     // 1. OPTIMISTIC UPDATE: Clear everything immediately
     setAllUsers([]);
@@ -473,7 +490,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider value={{
       currentUser, allUsers, incomingLikes, matches, messages, reports, isLoading, isConfigured, eventStatus, winners,
-      register, sendLike, respondToLike, sendMessage, reportUser, logout, resetEvent, configureServer, kickAllUsers, kickSpecificUser, toggleEventStatus, coronateWinners, resolveReport
+      register, sendLike, respondToLike, sendMessage, reportUser, logout, resetEvent, configureServer, kickAllUsers, kickSpecificUser, removeMatch, toggleEventStatus, coronateWinners, resolveReport
     }}>
       {children}
     </AppContext.Provider>
@@ -485,3 +502,4 @@ export const useApp = () => {
   if (!context) throw new Error("useApp must be used within AppProvider");
   return context;
 };
+
