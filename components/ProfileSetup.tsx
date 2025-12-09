@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { Button } from './Button';
@@ -13,20 +12,79 @@ export const ProfileSetup: React.FC = () => {
   const [photo, setPhoto] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // Admin Login State
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  
   // Camera States
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const handleAdminSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (adminPassword === '#31881985#') {
+        const adminPhoto = "https://ui-avatars.com/api/?name=Admin&background=000&color=fff&size=256&font-size=0.33&length=1";
+        try {
+            await register("Admin", "Staff del Evento 🛡️", adminPhoto);
+        } catch (e) {
+            alert("Error al intentar entrar. Revisa la conexión.");
+        }
+    } else {
+        alert("Contraseña incorrecta. ⛔");
+    }
+  };
+
   if (eventStatus === 'closed') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950 text-center">
-        <div>
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950 text-center animate-fade-in-up relative">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl relative z-10">
           <h1 className="text-6xl mb-4">⛔</h1>
           <h1 className="text-4xl font-black text-red-500 mb-4">CERRADO</h1>
-          <p className="text-white text-lg">El local no admite nuevos registros en este momento.</p>
-          <p className="text-slate-500 mt-2">Inténtalo más tarde.</p>
+          <p className="text-white text-lg font-medium">El local no admite nuevos registros en este momento.</p>
+          <p className="text-slate-500 mt-2 text-sm">Vuelve a intentarlo más tarde cuando empiece la fiesta.</p>
+          
+          <div className="mt-10 pt-6 border-t border-slate-800">
+             <button 
+               onClick={() => setShowAdminLogin(true)} 
+               disabled={isLoading}
+               className="text-xs text-slate-600 hover:text-white transition-colors font-bold flex items-center justify-center gap-2 w-full py-3 rounded hover:bg-slate-800"
+             >
+               🔐 Levantar Persiana (Entrar como Admin)
+             </button>
+          </div>
         </div>
+
+        {/* Modal de Login Admin */}
+        {showAdminLogin && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in-up">
+            <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl shadow-2xl w-full max-w-xs relative">
+              <button 
+                onClick={() => setShowAdminLogin(false)}
+                className="absolute top-2 right-2 text-slate-500 hover:text-white p-2"
+              >
+                ✕
+              </button>
+              <h3 className="text-xl font-bold text-white mb-4">Acceso Staff</h3>
+              <form onSubmit={handleAdminSubmit} className="space-y-4">
+                <div>
+                  <label className="text-xs text-slate-400 font-bold uppercase block mb-2">Contraseña Maestra</label>
+                  <input 
+                    type="password" 
+                    autoFocus
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-white text-center tracking-widest text-lg focus:ring-2 focus:ring-pink-500 outline-none"
+                    placeholder="PIN"
+                  />
+                </div>
+                <Button type="submit" isLoading={isLoading}>
+                  🔓 Entrar
+                </Button>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -47,7 +105,6 @@ export const ProfileSetup: React.FC = () => {
     setIsCameraOpen(true);
     setPhoto(null);
     try {
-      // Intentar primero cámara frontal (ideal para selfies)
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 640 } } 
       });
@@ -55,7 +112,6 @@ export const ProfileSetup: React.FC = () => {
     } catch (err) {
       console.warn("Fallo cámara frontal, intentando cámara genérica...", err);
       try {
-        // Fallback: Cualquier cámara disponible si la frontal falla (común en webviews antiguos)
         const streamFallback = await navigator.mediaDevices.getUserMedia({ video: true });
         if (videoRef.current) videoRef.current.srcObject = streamFallback;
       } catch (err2) {
@@ -74,7 +130,6 @@ export const ProfileSetup: React.FC = () => {
       canvas.height = video.videoHeight;
       const context = canvas.getContext('2d');
       if (context) {
-        // Hacemos espejo horizontal para que la selfie se sienta natural
         context.translate(canvas.width, 0);
         context.scale(-1, 1);
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -82,7 +137,6 @@ export const ProfileSetup: React.FC = () => {
         const dataUrl = canvas.toDataURL('image/png');
         setPhoto(dataUrl);
         
-        // Detener cámara para ahorrar batería
         const stream = video.srcObject as MediaStream;
         stream?.getTracks().forEach(track => track.stop());
         setIsCameraOpen(false);

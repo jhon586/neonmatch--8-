@@ -2,60 +2,49 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Button } from './Button';
 import { Input } from './Input';
+import { getSupabaseConfig } from '../lib/supabase';
 
 export const ServerSetup: React.FC = () => {
   const { configureServer } = useApp();
+  const [accessCode, setAccessCode] = useState('');
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  
+  // States para config manual si falla la automática
   const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
-  const [isAdminMode, setIsAdminMode] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSave = () => {
+  const handleAccess = () => {
+    if (accessCode === '#31881985#') {
+      // 1. Intentar conectar automáticamente con lo que haya (env o localstorage o hardcoded)
+      const existingConfig = getSupabaseConfig();
+      if (existingConfig) {
+        configureServer(existingConfig.url, existingConfig.key);
+      } else {
+        // Si no hay config, desbloqueamos el formulario manual
+        setIsUnlocked(true);
+        setError('');
+      }
+    } else {
+      setError('Contraseña incorrecta. Intruso detectado. 🚨');
+    }
+  };
+
+  const handleManualSave = () => {
     if (url && key) {
       configureServer(url, key);
     }
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
-      <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl text-center">
-        
-        {/* Vista para Invitados (Por defecto) */}
-        {!isAdminMode ? (
-          <div className="space-y-6">
-            <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-violet-600">
-              NeonMatch
-            </h1>
-            <p className="text-white text-lg font-medium">
-              ¡Bienvenido a la Fiesta!
-            </p>
-            <div className="bg-slate-800 p-4 rounded-xl text-slate-300 text-sm">
-              <p className="mb-2">👋 <b>¿Eres un invitado?</b></p>
-              <p>Por favor, escanea el <b>Código QR</b> que hay en el local o pide el enlace de invitación.</p>
-              <p className="mt-2 text-xs opacity-50">Así entrarás automáticamente sin configurar nada.</p>
-            </div>
-            
-            <div className="pt-8">
-               <button 
-                 onClick={() => setIsAdminMode(true)} 
-                 className="text-xs text-slate-700 hover:text-slate-500 underline"
-               >
-                 Soy el Organizador (Admin)
-               </button>
-            </div>
-          </div>
-        ) : (
-          /* Vista de Admin (Solo tú la ves si pulsas el botón) */
-          <div className="space-y-4 text-left">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-white">Configuración Admin</h2>
-              <button onClick={() => setIsAdminMode(false)} className="text-xs text-red-400">Cancelar</button>
-            </div>
-            
-            <p className="text-slate-400 text-xs mb-4">
-              Introduce las claves de Supabase para activar el sistema.
-            </p>
-
-            <Input 
+  if (isUnlocked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl text-center space-y-6">
+           <h2 className="text-2xl font-bold text-white">Configuración Inicial</h2>
+           <p className="text-slate-400 text-sm">
+             No se detectaron credenciales guardadas. Por favor, ingrésalas por única vez o añádelas al archivo <code>lib/supabase.ts</code> para memorizarlas.
+           </p>
+           <Input 
               label="Project URL" 
               placeholder="https://xyz.supabase.co"
               value={url}
@@ -68,11 +57,47 @@ export const ServerSetup: React.FC = () => {
               value={key}
               onChange={(e) => setKey(e.target.value)}
             />
-            <Button onClick={handleSave} disabled={!url || !key}>
-              Conectar Discoteca
+            <Button onClick={handleManualSave} disabled={!url || !key}>
+              Guardar y Conectar
             </Button>
-          </div>
-        )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-950">
+      <div className="max-w-md w-full bg-slate-900 border border-slate-800 p-8 rounded-2xl shadow-2xl text-center space-y-6 animate-fade-in-up">
+        
+        <div className="mb-4">
+           <div className="w-20 h-20 bg-slate-800 rounded-full mx-auto flex items-center justify-center text-4xl shadow-inner border border-slate-700">
+             🔐
+           </div>
+        </div>
+
+        <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-violet-600">
+          NeonMatch
+        </h1>
+        
+        <p className="text-white text-lg font-medium">
+          Acceso Restringido
+        </p>
+
+        <div className="text-left">
+           <Input 
+             type="password"
+             placeholder="Contraseña de Acceso"
+             value={accessCode}
+             onChange={(e) => { setAccessCode(e.target.value); setError(''); }}
+             className="text-center tracking-widest text-xl"
+           />
+           {error && <p className="text-red-500 text-xs text-center mt-2 font-bold">{error}</p>}
+        </div>
+        
+        <Button onClick={handleAccess} disabled={!accessCode}>
+          Entrar al Club
+        </Button>
+
       </div>
     </div>
   );
