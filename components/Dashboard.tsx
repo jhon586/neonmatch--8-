@@ -41,7 +41,13 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
   const [timerEnabled, setTimerEnabled] = useState(false);
 
   useEffect(() => {
-    setBaseUrlOverride(window.location.origin + window.location.pathname);
+    // Si estamos en localhost, sugerimos el dominio de producción por defecto
+    if (window.location.hostname.includes('localhost')) {
+        setBaseUrlOverride('https://www.fiesta-match.com');
+    } else {
+        setBaseUrlOverride(window.location.origin + window.location.pathname);
+    }
+    
     const params = new URLSearchParams(window.location.search);
     const voteParam = params.get('vote');
     if (voteParam) setTargetId(voteParam);
@@ -181,7 +187,8 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
   const config = getSupabaseConfig();
   const cleanBaseUrl = baseUrlOverride.replace(/\/$/, '');
   const inviteCode = config ? generateInviteCode(config.url, config.key) : '';
-  const magicLink = `${cleanBaseUrl}?invite=${encodeURIComponent(inviteCode)}`;
+  // Si no hay invite code (ya configurado en hardcode), el QR es solo la URL limpia
+  const magicLink = inviteCode ? `${cleanBaseUrl}?invite=${encodeURIComponent(inviteCode)}` : cleanBaseUrl;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(magicLink)}`;
 
   const whatsappMessage = `¡Únete a la fiesta! 🥂 Escanea o pulsa aquí para entrar y conseguir tu número: ${magicLink}`;
@@ -336,7 +343,7 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
                   <div className="space-y-2 flex-1 overflow-y-auto pr-2 pb-2">
                     {messages.filter(m => 
                         (m.senderId === viewingReport.reporterId && m.receiverId === viewingReport.reportedId) ||
-                        (m.senderId === viewingReport.reportedId && m.receiverId === viewingReport.reporterId)
+                        (m.senderId === viewingReport.reportedId && m.receiverId === viewingReport.reportedId)
                     ).map(m => (
                         <div key={m.id} className={`flex flex-col ${m.senderId === viewingReport.reporterId ? 'items-end' : 'items-start'}`}>
                             <div className={`max-w-[85%] text-sm p-3 rounded-xl ${m.senderId === viewingReport.reporterId ? 'bg-indigo-900/50 text-indigo-100 rounded-br-none' : 'bg-slate-700 text-slate-200 rounded-bl-none'}`}>
@@ -433,6 +440,18 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
              <button onClick={() => setShowInviteModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-2 font-bold">✕</button>
              <h3 className="text-2xl font-black text-slate-900 tracking-tight">¡Invita a la Fiesta!</h3>
              
+             {/* Edit Domain URL (For Hostalia/Production Setup) */}
+             <div className="text-left px-2">
+                 <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Enlace del QR (Editable):</label>
+                 <input 
+                    type="text" 
+                    value={baseUrlOverride} 
+                    onChange={(e) => setBaseUrlOverride(e.target.value)}
+                    className="w-full text-xs bg-slate-200 border border-slate-300 rounded p-2 text-slate-700 font-mono"
+                 />
+                 <p className="text-[10px] text-slate-400 mt-1">Si estás en Hostalia, pon aquí: <code>https://tu-dominio.com</code></p>
+             </div>
+
              <div className="bg-slate-100 p-4 rounded-2xl inline-block mx-auto border-4 border-slate-900 shadow-xl">
                <img src={qrImageUrl} alt="QR Invitación" className="w-48 h-48 mix-blend-multiply" />
              </div>
