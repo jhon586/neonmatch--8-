@@ -1,5 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
+// --- ZONA DE MEMORIZACIÓN ---
+// Si quieres dejar las claves fijas en el código, pégalas aquí dentro de las comillas.
+const MANUAL_URL = "https://edohesnkgnttbfsvaltj.supabase.co"; 
+const MANUAL_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkb2hlc25rZ250dGJmc3ZhbHRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQyODA0ODIsImV4cCI6MjA3OTg1NjQ4Mn0.lVvsrH0WnBnQhpXMcHokPE1p5COmBZI0fFF8X1J8smg";
+// ----------------------------
+
 const STORAGE_KEY_URL = 'neonmatch_sb_url';
 const STORAGE_KEY_KEY = 'neonmatch_sb_key';
 
@@ -14,6 +20,11 @@ export const generateInviteCode = (url: string, key: string) => {
 };
 
 export const getSupabaseConfig = () => {
+  // 0. Prioridad absoluta: Credenciales manuales en código ("Memorizadas")
+  if (MANUAL_URL && MANUAL_KEY) {
+      return { url: MANUAL_URL, key: MANUAL_KEY };
+  }
+
   const params = new URLSearchParams(window.location.search);
   
   // 1. Detección de Invitación Mágica (?invite=CODIGO)
@@ -47,7 +58,6 @@ export const getSupabaseConfig = () => {
   }
 
   // 3. Variables de entorno (Vite/Netlify)
-  // Usamos import.meta.env para Vite
   const env = (import.meta as any).env;
   if (env?.VITE_SUPABASE_URL && env?.VITE_SUPABASE_KEY) {
     return { url: env.VITE_SUPABASE_URL, key: env.VITE_SUPABASE_KEY };
