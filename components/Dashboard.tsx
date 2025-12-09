@@ -14,7 +14,7 @@ type SecurityAction =
 export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ onViewChange }) => {
   const { 
     currentUser, sendLike, incomingLikes, respondToLike, matches, logout, allUsers, 
-    resetEvent, kickAllUsers, kickSpecificUser, toggleEventStatus, eventStatus, coronateWinners, winners,
+    resetEvent, kickAllUsers, kickSpecificUser, removeMatch, toggleEventStatus, eventStatus, coronateWinners, winners,
     reports, resolveReport, messages
   } = useApp();
   const [targetId, setTargetId] = useState('');
@@ -169,6 +169,14 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
       setSecurityPin('');
   };
 
+  const handleUnmatch = async (id1: number, id2: number) => {
+      if (confirm("¿Estás seguro de que quieres romper este match? Ambos usuarios permanecerán en la fiesta.")) {
+          await removeMatch(id1, id2);
+          setViewingReport(null); // Cerrar reporte
+          alert("Match eliminado.");
+      }
+  };
+
   const getPartnerId = (req: any) => req.fromId === currentUser.id ? req.toId : req.fromId;
   const config = getSupabaseConfig();
   const cleanBaseUrl = baseUrlOverride.replace(/\/$/, '');
@@ -302,28 +310,30 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
 
       {/* Lightbox para Admin (Ver fotos en grande) */}
       {enlargedPhoto && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4" onClick={() => setEnlargedPhoto(null)}>
-           <img src={enlargedPhoto} className="max-w-full max-h-full rounded-xl shadow-2xl" />
+        <div className="fixed inset-0 z-[200] bg-black/95 flex items-center justify-center p-4" onClick={() => setEnlargedPhoto(null)}>
+           <img src={enlargedPhoto} className="max-w-full max-h-full rounded-xl shadow-2xl object-contain" />
            <button className="absolute top-4 right-4 text-white bg-slate-800 rounded-full p-2">✕</button>
         </div>
       )}
 
       {/* Visor de Reportes (Disputas) */}
       {viewingReport && (
-          <div className="fixed inset-0 z-50 bg-slate-900 p-6 overflow-y-auto animate-fade-in-up">
-              <button onClick={() => setViewingReport(null)} className="mb-4 text-slate-400 hover:text-white flex items-center gap-2">← Volver al Panel</button>
-              
-              <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl mb-6">
-                <h2 className="text-xl font-bold text-red-400">Disputa Activa</h2>
-                <p className="text-white mt-1 font-medium">Motivo: "{viewingReport.reason}"</p>
-                <p className="text-sm text-red-300 mt-2">Reporter ID: {viewingReport.reporterId} | Reported ID: {viewingReport.reportedId}</p>
+          <div className="fixed inset-0 z-50 bg-slate-900 p-6 overflow-y-auto animate-fade-in-up flex flex-col">
+              <div className="flex-none">
+                  <button onClick={() => setViewingReport(null)} className="mb-4 text-slate-400 hover:text-white flex items-center gap-2">← Volver al Panel</button>
+                  
+                  <div className="bg-red-500/10 border border-red-500/30 p-4 rounded-xl mb-4">
+                    <h2 className="text-xl font-bold text-red-400">Disputa Activa</h2>
+                    <p className="text-white mt-1 font-medium">Motivo: "{viewingReport.reason}"</p>
+                    <p className="text-sm text-red-300 mt-2">Reporter ID: {viewingReport.reporterId} | Reported ID: {viewingReport.reportedId}</p>
+                  </div>
               </div>
               
-              <div className="bg-slate-800 p-4 rounded-xl space-y-3 mb-6 shadow-xl">
-                  <h3 className="font-bold text-white border-b border-slate-700 pb-2 flex items-center gap-2">
-                      <span>🕵️‍♂️</span> Historial de Chat
+              <div className="bg-slate-800 p-4 rounded-xl space-y-3 mb-4 shadow-xl flex-1 overflow-hidden flex flex-col">
+                  <h3 className="font-bold text-white border-b border-slate-700 pb-2 flex-none">
+                      <span>🕵️‍♂️</span> Historial Visual de Chat
                   </h3>
-                  <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
+                  <div className="space-y-2 flex-1 overflow-y-auto pr-2 pb-2">
                     {messages.filter(m => 
                         (m.senderId === viewingReport.reporterId && m.receiverId === viewingReport.reportedId) ||
                         (m.senderId === viewingReport.reportedId && m.receiverId === viewingReport.reporterId)
@@ -332,20 +342,62 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
                             <div className={`max-w-[85%] text-sm p-3 rounded-xl ${m.senderId === viewingReport.reporterId ? 'bg-indigo-900/50 text-indigo-100 rounded-br-none' : 'bg-slate-700 text-slate-200 rounded-bl-none'}`}>
                                 <span className="font-bold text-[10px] block mb-1 opacity-70 uppercase tracking-wider">{m.senderId === viewingReport.reporterId ? 'Reporter' : 'Reported'}</span>
                                 {m.type === 'image' ? (
-                                    <div className="text-xs bg-black/30 p-2 rounded">📷 [Imagen Enviada]</div>
-                                ) : m.text}
+                                    m.attachmentUrl ? (
+                                        <div className="mt-1">
+                                            <img 
+                                                src={m.attachmentUrl} 
+                                                className="rounded-lg h-32 w-auto object-cover border border-white/20 cursor-pointer hover:opacity-90"
+                                                onClick={() => setEnlargedPhoto(m.attachmentUrl || null)}
+                                            />
+                                            <span className="text-[10px] text-slate-400 block mt-1">📷 Clic para ampliar</span>
+                                        </div>
+                                    ) : <span className="italic text-xs opacity-50">Cargando imagen...</span>
+                                ) : (
+                                    m.text
+                                )}
                             </div>
                         </div>
                     ))}
+                    {messages.filter(m => (m.senderId === viewingReport.reporterId && m.receiverId === viewingReport.reportedId) || (m.senderId === viewingReport.reportedId && m.receiverId === viewingReport.reporterId)).length === 0 && (
+                        <p className="text-center text-slate-500 text-sm mt-4">No hay mensajes previos.</p>
+                    )}
                   </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => { resolveReport(viewingReport.id); setViewingReport(null); }} className="bg-green-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-green-500 transition-colors">
-                      ✅ Marcar Resuelto
+              {/* Botones de Acción Específicos */}
+              <div className="flex-none space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                       {(() => {
+                           const reporterUser = allUsers.find(u => u.id === viewingReport.reporterId);
+                           const reportedUser = allUsers.find(u => u.id === viewingReport.reportedId);
+                           return (
+                               <>
+                                 <button 
+                                    onClick={() => { initiateKickUser(viewingReport.reporterId, reporterUser?.name || 'User'); setViewingReport(null); }}
+                                    className="bg-red-600/80 hover:bg-red-600 text-white p-3 rounded-lg text-xs font-bold"
+                                 >
+                                     🚫 Echar a #{viewingReport.reporterId} <br/> ({reporterUser?.name || 'User'})
+                                 </button>
+                                 <button 
+                                    onClick={() => { initiateKickUser(viewingReport.reportedId, reportedUser?.name || 'User'); setViewingReport(null); }}
+                                    className="bg-red-600 hover:bg-red-500 text-white p-3 rounded-lg text-xs font-bold shadow-lg"
+                                 >
+                                     🚫 Echar a #{viewingReport.reportedId} <br/> ({reportedUser?.name || 'User'})
+                                 </button>
+                               </>
+                           )
+                       })()}
+                  </div>
+                  
+                  <button 
+                    onClick={() => handleUnmatch(viewingReport.reporterId, viewingReport.reportedId)}
+                    className="w-full bg-orange-500 hover:bg-orange-400 text-white py-3 rounded-xl font-bold shadow-lg transition-colors"
+                  >
+                      💔 Solo Romper Match (Sin expulsar)
                   </button>
-                  <button onClick={() => { initiateKickAll(); setViewingReport(null); }} className="bg-red-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-red-500 transition-colors">
-                      🛑 Echar a Todos
+
+                  <button onClick={() => { resolveReport(viewingReport.id); setViewingReport(null); }} className="w-full bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl font-bold shadow-lg transition-colors">
+                      ✅ Caso Resuelto (Cerrar)
                   </button>
               </div>
           </div>
@@ -583,4 +635,4 @@ export const Dashboard: React.FC<{ onViewChange: (view: 'chat') => void }> = ({ 
       </div>
     </div>
   );
-};
+}
